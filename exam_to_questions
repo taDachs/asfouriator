@@ -1,0 +1,41 @@
+#!/bin/bash
+
+set -e
+
+QUESTIONS="$1"
+SOLUTIONS="$2"
+shift 2
+
+replace_pdf_artifacts() {
+  # fixes a bunch of spelling stuff and removes points
+  sed 's/[0-9]\(\.5\)\? [Pp]\.//g' \
+    | sed 's/([0-9]\+ Points)//g' \
+    | sed 's/\<nger\>/finger/gi' \
+    | sed 's/\<dierence\>/difference/gi' \
+    | sed 's/\<dierences\>/differences/gi' \
+    | sed 's/\<dierent\>/different/gi' \
+    | sed 's/\<oer\>/offer/gi' \
+    | sed 's/\<inuence\>/influence/gi' \
+    | sed 's/\<gure\>/figure/gi' \
+    | sed 's/\<eciency\>/efficiency/gi' \
+    | sed 's/\<exion\>/flexion/gi' \
+    | sed 's/\<signicantly\>/significantly/gi' \
+    | sed 's/\<denition\>/definition/gi' \
+    | sed 's/\<denitions\>/definition/gi' \
+    | sed 's/\<dened\>/defined/gi' \
+    | sed 's/\<ve\>/five/g' \
+    | sed 's/\<briey\>/briefly/gi' \
+    | sed 's/\<nal\>/final/g' \
+    | sed 's/\<dorsiexion\>/dorsieflexion/g' \
+    | sed 's/\<plantarexion\>/plantarflexion/g' \
+    ;
+}
+
+pdftk "$QUESTIONS" cat 2-end output /tmp/exam.pdf > /dev/null
+pdftk "$SOLUTIONS" cat 2-end output /tmp/solutions.pdf > /dev/null
+ebook-convert /tmp/exam.pdf /tmp/exam.txt --unwrap-factor 1 --asciiize --no-images > /dev/null
+ebook-convert /tmp/solutions.pdf /tmp/solutions.txt --unwrap-factor 1 --asciiize --no-images > /dev/null
+cat /tmp/exam.txt | replace_pdf_artifacts > /tmp/processed_exam.txt
+cat /tmp/solutions.txt | replace_pdf_artifacts > /tmp/processed_solutions.txt
+
+./parse_questions --questions /tmp/processed_exam.txt --solutions /tmp/processed_solutions.txt "$@"

@@ -1,0 +1,223 @@
+#!/usr/bin/env python3
+
+import itertools
+import re
+import argparse
+import genanki
+
+
+def preprocess_text(fp):
+    lines = (line.strip() for line in fp if line.strip())
+
+    wrong_linebreak_pattern = re.compile(r"\. \d\. ")
+
+    for line in lines:
+        match = wrong_linebreak_pattern.match(line)
+        if match:
+            yield line[: match.start() + 1]
+            yield line[match.start() + 1 :]
+        else:
+            yield line
+
+
+def parse_pages(fp):
+    page_heading_pattern = re.compile(r"^Exercise \d")
+    lines = list(preprocess_text(fp))
+    while True:
+        page = lines[:1] + list(
+            itertools.takewhile(lambda x: not page_heading_pattern.match(x), lines[1:])
+        )
+        lines = list(itertools.dropwhile(lambda x: not page_heading_pattern.match(x), lines[1:]))
+        yield page
+        if not lines:
+            break
+
+
+def remove_footer(page):
+    linenum = 0
+    footer = "Wearable Robotic Technologies"
+    out = []
+    while linenum < len(page):
+        line = page[linenum]
+        if footer not in line:
+            out.append(line)
+            linenum += 1
+        else:
+            linenum += 2
+    return out
+
+
+def parse_exercises(page):
+    exercise = []
+    linenum = 1
+    exercise_pattern = re.compile(r"^\d\.( |$)")
+    while linenum < (len(page) - 2):
+        l1, l2 = page[linenum : linenum + 2]
+        linenum += 1
+
+        if exercise_pattern.match(l1) and exercise:
+            yield exercise
+            exercise = []
+
+        if l1.endswith("Figure") and l2[0].isnumeric():
+            l1 += " " + l2
+            linenum += 1
+
+        exercise.append(l1)
+
+    while linenum < len(page):
+        l1 = page[linenum]
+        linenum += 1
+        if exercise_pattern.match(l1) and exercise:
+            yield exercise
+            exercise = []
+        exercise.append(l1)
+
+    if exercise:
+        yield exercise
+
+
+def linebreak_exercise(exercise):
+    subexercise_pattern = re.compile(r"^\([a-z]\)")
+    list_pattern = re.compile(r"^\*")
+
+    lines = []
+    full_line = exercise[0][3:]
+
+    for line in exercise[1:]:
+        if subexercise_pattern.match(line) or list_pattern.match(line):
+            lines.append(full_line)
+            full_line = ""
+        elif full_line.endswith("-"):
+            full_line = full_line[:-1]
+        else:
+            full_line += " "
+
+        full_line += line
+    if full_line:
+        lines.append(full_line)
+    return lines
+
+
+def parse_exercises_from_path(path):
+    pages = []
+    with open(path) as f:
+        for page in parse_pages(f):
+            page = remove_footer(page)
+            if not page:
+                continue
+            exercises = [
+                linebreak_exercise(exercise)
+                for exercise in parse_exercises(page)
+                if exercise[0][0].isnumeric()
+            ]
+            pages.append(exercises)
+    return pages
+
+
+def print_exercises(exercises):
+    for exercise in exercises:
+        print("\n".join(exercise))
+        print()
+        print("---")
+        print()
+
+
+def write_file(questions_pages, solutions_pages, fp):
+    for i, (questions, solutions) in enumerate(zip(questions_pages, solutions_pages)):
+        fp.write(f"## Page {i + 1}\n")
+        fp.write("\n")
+        if len(questions) == len(solutions):
+            for j, (question, solution) in enumerate(zip(questions, solutions)):
+                fp.write(f"### {j + 1}\n")
+                fp.write("\n")
+                fp.write("**Question:**\n")
+                fp.write("\n".join(question))
+                fp.write("\n")
+                fp.write("\n")
+                fp.write("**Solution:**\n")
+                fp.write("\n".join(solution))
+                fp.write("\n")
+                fp.write("\n")
+        else:
+            fp.write("*failed to find all exercises or solutions are missing*\n")
+            fp.write("\n")
+            fp.write("**Questions:**\n")
+            fp.write("\n")
+            for j, question in enumerate(questions):
+                fp.write(f"{j + 1}: ")
+                fp.write("\n".join(question))
+                fp.write("\n")
+            fp.write("\n")
+            fp.write("**Solutions:**\n")
+            fp.write("\n")
+            for j, solution in enumerate(solutions):
+                fp.write(f"{j + 1}: ")
+                fp.write("\n".join(solution))
+                fp.write("\n")
+
+
+def write_anki_deck(questions_pages, solutions_pages, outpath):
+    my_model = genanki.Model(
+        1607392319,
+        "Simple Model",
+        fields=[
+            {"name": "Question"},
+            {"name": "Answer"},
+        ],
+        templates=[
+            {
+                "name": "Card 1",
+                "qfmt": "{{Question}}",
+                "afmt": '{{FrontSide}}<hr id="answer"><div>{{Answer}}</div>',
+            },
+        ],
+    )
+
+    my_deck = genanki.Deck(2059400110, 'WRT')
+
+    for i, (questions, solutions) in enumerate(zip(questions_pages, solutions_pages)):
+        if len(questions) == len(solutions):
+            for j, (question, solution) in enumerate(zip(questions, solutions)):
+                my_note = genanki.Note(
+                    model=my_model,
+                    fields=["<br>".join(question), "<br>".join(solution)])
+                my_deck.add_note(my_note)
+
+    genanki.Package(my_deck).write_to_file(outpath)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--questions", type=str, required=True, help="text file with questions")
+    parser.add_argument("--solutions", type=str, required=True, help="text file with solutions")
+    parser.add_argument("--out", type=str, default=None, help="where to store the file")
+    parser.add_argument("--test", action="store_true", help="if set runs assertion")
+    parser.add_argument("--anki", action="store_true", help="if set writes anki set")
+
+    args = parser.parse_args()
+    questions_file = args.questions
+    solutions_file = args.solutions
+
+    questions = parse_exercises_from_path(questions_file)
+    solutions = parse_exercises_from_path(solutions_file)
+
+    num_questions = [len(page) for page in questions]
+    num_solutions = [len(page) for page in solutions]
+
+    if args.test:
+        print(num_questions)
+        print(num_solutions)
+        assert num_questions == num_solutions
+
+    if args.anki:
+        outfile = args.out or "output.apkg"
+        write_anki_deck(questions, solutions, args.out)
+    else:
+        outfile = args.out or "combined.md"
+        with open(outfile, "w") as f:
+            write_file(questions, solutions, f)
+
+
+if __name__ == "__main__":
+    main()

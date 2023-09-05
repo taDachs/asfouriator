@@ -1,0 +1,28 @@
+#!/bin/bash
+
+success_count=0
+fail_count=0
+success_semesters=()
+failed_semesters=()
+
+for sem in ss18 ss19 ss_20 ss21 ss22 ws18 ws19 ws20 ws21; do
+  echo "Testing $sem"
+  
+  # Running the command and suppressing its output
+  ./exam_to_questions $HOME/studium/current_modules/WRT/aufgabensammlung/*$sem* --test > /dev/null 2>&1
+  
+  # Check exit status
+  if [ $? -eq 0 ]; then
+    success_count=$((success_count + 1))
+    success_semesters+=("$sem")
+  else
+    fail_count=$((fail_count + 1))
+    failed_semesters+=("$sem")
+  fi
+done
+
+echo "exam_to_questions succeeded $success_count times."
+echo "Successful semesters: ${success_semesters[@]}"
+echo "exam_to_questions failed $fail_count times."
+echo "Failed semesters: ${failed_semesters[@]}"
+
